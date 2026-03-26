@@ -1,0 +1,15 @@
+# Model and results files
+*.pkl
+*.npz
+*.npy
+
+# Simulation data
+*.txt_DEN
+*.csfs
+*.csv*
+
+# Plot and text outputs
+*.png
+*_marginals.txt
+*_coverage.txt
+*_ranks.npy
