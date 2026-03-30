@@ -15,16 +15,18 @@ Usage:
     python validate_npe.py --pkl <posterior.pkl> --simTAG <tag>
                            [--n_held_out 500] [--n_posterior_samples 500]
                            [--threepara] [--seed 42] [--out_prefix validation]
+                           [--normalize none|median|median_pre_cut|sum|sum_pre_cut] [--cut 10]
 """
 
 import argparse
-import pickle
 import sys
 import numpy as np
 import torch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+from npe_utils import NORMALIZE_CHOICES, make_normalizer, load_posterior
 
 
 PARAM_NAMES_DEFAULT = ["alpha", "T_merge", "T_split", "Ghost_Ne"]
@@ -33,12 +35,8 @@ COVERAGE_LEVELS     = np.round(np.linspace(0.05, 0.95, 19), 3)
 
 # ── I/O ───────────────────────────────────────────────────────────────────────
 
-def load_posterior(path):
-    with open(path, "rb") as f:
-        return pickle.load(f)
 
-
-def load_simulations(simTAG, threepara):
+def load_simulations(simTAG, threepara, normalize_fn):
     parfile  = f"{simTAG}.par.txt_DEN"
     csfsfile = f"{simTAG}.sim.txt_DEN"
     print(f"Loading {parfile}")
@@ -47,6 +45,7 @@ def load_simulations(simTAG, threepara):
     csfs   = np.loadtxt(csfsfile, dtype=np.float32)
     if threepara:
         params = params[:, :3]
+    csfs = np.apply_along_axis(normalize_fn, 1, csfs)
     return params, csfs
 
 
@@ -231,13 +230,20 @@ def main():
     parser.add_argument("--threepara", action="store_true", default=False)
     parser.add_argument("--seed",      type=int, default=42)
     parser.add_argument("--out_prefix", default="npe_validation")
+    parser.add_argument("--normalize", type=str, default="none",
+                        choices=NORMALIZE_CHOICES,
+                        help="Normalization applied to CSFS — must match what was used during training")
+    parser.add_argument("--cut", type=int, default=0,
+                        help="Elements to trim from each tail of each half (default 0; abc_new.R uses 10)")
     args = parser.parse_args()
 
     # ── Load ──────────────────────────────────────────────────────────────────
     print(f"Loading posterior: {args.pkl}")
-    posterior = load_posterior(args.pkl)
+    expected_meta = {"normalize": args.normalize, "cut": args.cut}
+    posterior, _ = load_posterior(args.pkl, expected_meta)
 
-    params, csfs = load_simulations(args.simTAG, args.threepara)
+    normalize_fn = make_normalizer(args.normalize, args.cut)
+    params, csfs = load_simulations(args.simTAG, args.threepara, normalize_fn)
     n_total, p   = params.shape
 
     names = PARAM_NAMES_DEFAULT[:p]

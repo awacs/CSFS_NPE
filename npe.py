@@ -6,20 +6,30 @@ Modes:
     Train mode  (--simTAG):           train on simulations, save .npz + .pkl
     Resample mode (--load_posterior): skip training, query existing .pkl for a new target
 
-Normalization (--normalize):
-    none   : raw CSFS (default)
-    median : each half normalized by (x - median) / MAD  (MAD with 1.4826 scale, matching R)
-    sum    : each half divided by its sum
+Sampler (--sampler):
+    rejection : SBI default — draw proposals from the flow, reject outside prior (default)
+    flow      : sample directly from the normalizing flow, no prior rejection
+    mcmc      : MCMC sampling (NUTS/slice/HMC via --mcmc_method); slower but prior-respecting
 
-    NOTE: train and load_posterior must use the same normalization.
+Normalization (--normalize, --cut):
+    none           : raw CSFS (default)
+    median         : cut tails, then normalize inner region by (x - median) / MAD
+    median_pre_cut : normalize full half by (x - median) / MAD, then cut tails
+    sum            : cut tails, then divide inner region by its sum
+    sum_pre_cut    : divide full half by its sum, then cut tails
+
+    --cut N (default 0): elements to trim from each tail of each half.
+        N=10 matches abc_new.R default (output length = (99 - 2*N) * 2).
+        N=0 keeps all 198 elements.
+
+    NOTE: --normalize and --cut must match between train and resample.
 
 Usage:
-    python npe.py --target <csfs_file> --simTAG <tag> [--threepara] [--normalize median|sum]
-    python npe.py --target <csfs_file> --load_posterior <posterior.pkl> [--normalize median|sum]
+    python npe.py --target <csfs_file> --simTAG <tag> [options]
+    python npe.py --target <csfs_file> --load_posterior <posterior.pkl> [options]
 """
 
 import argparse
-import pickle
 import sys
 import numpy as np
 import pandas as pd
@@ -27,62 +37,28 @@ import torch
 from sbi.inference import SNPE
 from sbi.utils import BoxUniform
 
-
-def normalize_csfs(x):
-    """Normalize a single CSFS vector — applied identically to target and each sim row."""
-    raise NotImplementedError  # replaced per method below
+from npe_utils import (NORMALIZE_CHOICES, SAMPLER_CHOICES, make_normalizer,
+                       load_target, save_results, save_posterior, load_posterior)
 
 
-def make_normalizer(method):
-    """Return a function that normalizes a 1-D CSFS array of length 198."""
-    if method == "none":
-        return lambda x: x.copy()
+def draw_samples(posterior, x_obs, n, sampler, mcmc_method):
+    """Sample from the posterior using the specified sampler."""
+    if sampler == "rejection":
+        with torch.no_grad():
+            return posterior.sample((n,), x=x_obs)
 
-    if method == "median":
-        def _mad(v):
-            return 1.4826 * np.median(np.abs(v - np.median(v)))
-        def norm(x):
-            out = x.copy().astype(np.float64)
-            for sl in (slice(0, 99), slice(99, 198)):
-                h = out[sl]
-                out[sl] = (h - np.median(h)) / _mad(h)
-            return out.astype(np.float32)
+    if sampler == "flow":
+        with torch.no_grad():
+            return posterior.posterior_estimator.sample(
+                (n,), condition=x_obs.unsqueeze(0)
+            ).reshape(n, -1)
 
-    elif method == "sum":
-        def norm(x):
-            out = x.copy().astype(np.float64)
-            for sl in (slice(0, 99), slice(99, 198)):
-                h = out[sl]
-                out[sl] = h / h.sum()
-            return out.astype(np.float32)
+    if sampler == "mcmc":
+        return posterior.sample(
+            (n,), x=x_obs, sample_with="mcmc", mcmc_method=mcmc_method
+        )
 
-    else:
-        sys.exit(f"ERROR: unknown --normalize '{method}'. Choose: none, median, sum.")
-
-    return norm
-
-
-def load_target(path, normalize_fn):
-    target_raw = pd.read_csv(path, sep=r'\s+', header=None)
-    raw = target_raw.values.sum(axis=0).astype(np.float32)
-    return normalize_fn(raw), raw   # return both normalized and raw
-
-
-def save_results(outbase, samples, samples_log, x_obs_np):
-    np.savez(
-        outbase + "_results.npz",
-        samples=samples,
-        samples_log=samples_log,
-        x_obs=x_obs_np,
-        param_means=samples.mean(axis=0),
-        param_stds=samples.std(axis=0),
-        param_quantiles=np.quantile(samples, [0.025, 0.25, 0.5, 0.75, 0.975], axis=0),
-    )
-    print(f"  Results archive : {outbase}_results.npz")
-    print(f"Posterior samples shape: {samples.shape}")
-    print(f"Parameter means: {samples.mean(axis=0)}")
-    print(f"Parameter stds:  {samples.std(axis=0)}")
-    print(f"95% CI:\n{np.quantile(samples, [0.025, 0.975], axis=0)}")
+    raise ValueError(f"Unknown sampler '{sampler}'. Choose: {', '.join(SAMPLER_CHOICES)}.")
 
 
 def main():
@@ -90,14 +66,24 @@ def main():
     parser.add_argument("--target", type=str, required=True,
                         help="Observed CSFS file")
     parser.add_argument("--simTAG", type=str, default=None,
-                        help="Simulation tag — triggers training mode")
+                        help="Simulation tag — triggers training mode; "
+                             "expects <tag>.par.txt_DEN and <tag>.sim.txt_DEN")
     parser.add_argument("--load_posterior", type=str, default=None,
                         help="Path to existing .pkl — skips training, resamples for new target")
     parser.add_argument("--threepara", action="store_true", default=False,
                         help="Use only first 3 parameters (train mode only)")
     parser.add_argument("--normalize", type=str, default="none",
-                        choices=["none", "median", "sum"],
+                        choices=NORMALIZE_CHOICES,
                         help="Normalization applied to CSFS (must match between train and resample)")
+    parser.add_argument("--cut", type=int, default=0,
+                        help="Elements to trim from each tail of each half "
+                             "(default 0; abc_new.R uses 10)")
+    parser.add_argument("--sampler", type=str, default="rejection",
+                        choices=SAMPLER_CHOICES,
+                        help="Posterior sampling method (default: rejection)")
+    parser.add_argument("--mcmc_method", type=str, default="nuts",
+                        choices=["nuts", "slice", "hmc"],
+                        help="MCMC algorithm — only used when --sampler mcmc (default: nuts)")
     parser.add_argument("--num_posterior_samples", type=int, default=10000,
                         help="Posterior samples to draw")
     args = parser.parse_args()
@@ -107,7 +93,11 @@ def main():
     if args.simTAG and args.load_posterior:
         sys.exit("ERROR: --simTAG and --load_posterior are mutually exclusive.")
 
-    normalize_fn = make_normalizer(args.normalize)
+    normalize_fn = make_normalizer(args.normalize, args.cut)
+
+    # suffix encodes sampler only when non-default, to keep filenames clean
+    sampler_tag = "" if args.sampler == "rejection" else f"_{args.sampler}"
+    cut_tag     = f"_cut{args.cut}" if args.cut > 0 else ""
 
     # ── Load observed target ──────────────────────────────────────────────────
     print(f"Loading observed target from {args.target}")
@@ -117,26 +107,20 @@ def main():
     # ── Resample mode ─────────────────────────────────────────────────────────
     if args.load_posterior:
         print(f"Loading posterior from {args.load_posterior}")
-        with open(args.load_posterior, "rb") as f:
-            posterior = pickle.load(f)
+        expected_meta = {"normalize": args.normalize, "cut": args.cut}
+        posterior, _ = load_posterior(args.load_posterior, expected_meta)
 
-        # Warn if normalization might not match what was used during training
-        pkl_name = args.load_posterior
-        for nm in ("median", "sum"):
-            if f"_{nm}_npe" in pkl_name and args.normalize != nm:
-                print(f"WARNING: posterior filename suggests --normalize {nm} "
-                      f"but got '{args.normalize}'. Results may be wrong.")
+        print(f"Sampling {args.num_posterior_samples} posterior samples "
+              f"({args.sampler})...")
+        samples_log = draw_samples(
+            posterior, x_obs, args.num_posterior_samples,
+            args.sampler, args.mcmc_method
+        )
+        samples = torch.exp(samples_log).numpy()
 
-        print(f"Sampling {args.num_posterior_samples} posterior samples...")
-        with torch.no_grad():
-            samples_log = posterior.sample(
-                (args.num_posterior_samples,), x=x_obs
-            )
-        samples = torch.exp(samples_log.numpy())
-
-        outbase = f"{args.target}_{args.normalize}_npe"
+        outbase = f"{args.target}_{args.normalize}{cut_tag}_npe{sampler_tag}"
         save_results(outbase, samples, samples_log.numpy(), x_obs_raw)
-        print(f"\nDone.")
+        print("\nDone.")
         return
 
     # ── Train mode ────────────────────────────────────────────────────────────
@@ -154,20 +138,17 @@ def main():
         f"Row count mismatch: {len(parsim)} params vs {len(csfs_sim)} simulations"
     )
 
-    if args.threepara:
-        params = parsim.iloc[:, :3].values
-    else:
-        params = parsim.values
+    params = parsim.iloc[:, :3].values if args.threepara else parsim.values
 
     log_params = np.log(params).astype(np.float32)
     x_sim_np   = np.apply_along_axis(normalize_fn, 1, csfs_sim.values.astype(np.float32))
 
-    theta = torch.from_numpy(log_params)
-    x_sim = torch.from_numpy(x_sim_np)
-
-    low    = torch.tensor(log_params.min(axis=0), dtype=torch.float32)
-    high   = torch.tensor(log_params.max(axis=0), dtype=torch.float32)
-    prior  = BoxUniform(low=low, high=high)
+    theta  = torch.from_numpy(log_params)
+    x_sim  = torch.from_numpy(x_sim_np)
+    prior  = BoxUniform(
+        low=torch.tensor(log_params.min(axis=0), dtype=torch.float32),
+        high=torch.tensor(log_params.max(axis=0), dtype=torch.float32),
+    )
 
     inference = SNPE(prior=prior, show_progress_bars=True)
     inference.append_simulations(theta, x_sim)
@@ -176,24 +157,35 @@ def main():
     density_estimator = inference.train(show_train_summary=True)
 
     print("Building posterior...")
-    posterior = inference.build_posterior(density_estimator)
-
-    print(f"Sampling {args.num_posterior_samples} posterior samples...")
-    with torch.no_grad():
-        samples_log = posterior.sample(
-            (args.num_posterior_samples,), x=x_obs
+    if args.sampler == "mcmc":
+        posterior = inference.build_posterior(
+            density_estimator, sample_with="mcmc", mcmc_method=args.mcmc_method
         )
-    samples = torch.exp(samples_log.numpy())
+    else:
+        posterior = inference.build_posterior(density_estimator)
+
+    print(f"Sampling {args.num_posterior_samples} posterior samples "
+          f"({args.sampler})...")
+    samples_log = draw_samples(
+        posterior, x_obs, args.num_posterior_samples,
+        args.sampler, args.mcmc_method
+    )
+    samples = torch.exp(samples_log).numpy()
 
     tag_suffix = "_3para" if args.threepara else "_4para"
-    outbase    = f"{args.target}{TAG}{tag_suffix}_{args.normalize}_npe"
+    outbase    = f"{args.target}{TAG}{tag_suffix}_{args.normalize}{cut_tag}_npe{sampler_tag}"
 
     save_results(outbase, samples, samples_log.numpy(), x_obs_raw)
 
-    with open(outbase + "_posterior.pkl", "wb") as f:
-        pickle.dump(posterior, f)
+    meta = {
+        "normalize": args.normalize,
+        "cut":       args.cut,
+        "threepara": args.threepara,
+        "sampler":   args.sampler,
+    }
+    save_posterior(outbase + "_posterior.pkl", posterior, meta)
 
-    print(f"\nDone.")
+    print("\nDone.")
     print(f"  Posterior object: {outbase}_posterior.pkl")
 
 
