@@ -30,6 +30,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 import numpy as np
 import pandas as pd
@@ -86,6 +87,8 @@ def main():
                         help="MCMC algorithm — only used when --sampler mcmc (default: nuts)")
     parser.add_argument("--num_posterior_samples", type=int, default=10000,
                         help="Posterior samples to draw")
+    parser.add_argument("--out_dir", type=str, default=".",
+                        help="Directory for output files (default: current working directory)")
     args = parser.parse_args()
 
     if args.simTAG is None and args.load_posterior is None:
@@ -118,7 +121,10 @@ def main():
         )
         samples = torch.exp(samples_log).numpy()
 
-        outbase = f"{args.target}_{args.normalize}{cut_tag}_npe{sampler_tag}"
+        target_base = os.path.basename(args.target)
+        os.makedirs(args.out_dir, exist_ok=True)
+        outbase = os.path.join(args.out_dir,
+                               f"{target_base}_{args.normalize}{cut_tag}_npe{sampler_tag}")
         save_results(outbase, samples, samples_log.numpy(), x_obs_raw)
         print("\nDone.")
         return
@@ -172,8 +178,12 @@ def main():
     )
     samples = torch.exp(samples_log).numpy()
 
-    tag_suffix = "_3para" if args.threepara else "_4para"
-    outbase    = f"{args.target}{TAG}{tag_suffix}_{args.normalize}{cut_tag}_npe{sampler_tag}"
+    tag_suffix  = "_3para" if args.threepara else "_4para"
+    target_base = os.path.basename(args.target)
+    tag_base    = os.path.basename(TAG)
+    os.makedirs(args.out_dir, exist_ok=True)
+    outbase     = os.path.join(args.out_dir,
+                               f"{target_base}{tag_base}{tag_suffix}_{args.normalize}{cut_tag}_npe{sampler_tag}")
 
     save_results(outbase, samples, samples_log.numpy(), x_obs_raw)
 

@@ -282,23 +282,33 @@ def main():
                         help="Number of held-out simulations to test (default: 500)")
     parser.add_argument("--n_posterior_samples", type=int, default=500,
                         help="Posterior samples per held-out sim (default: 500)")
-    parser.add_argument("--threepara", action="store_true", default=False)
+    parser.add_argument("--threepara", action="store_true", default=False,
+                        help="Fallback for legacy pkls with no metadata")
     parser.add_argument("--seed",      type=int, default=42)
     parser.add_argument("--out_prefix", default="npe_validation")
     parser.add_argument("--normalize", type=str, default="none",
                         choices=NORMALIZE_CHOICES,
-                        help="Normalization applied to CSFS — must match what was used during training")
+                        help="Fallback for legacy pkls with no metadata")
     parser.add_argument("--cut", type=int, default=0,
-                        help="Elements to trim from each tail of each half (default 0; abc_new.R uses 10)")
+                        help="Fallback for legacy pkls with no metadata")
     args = parser.parse_args()
 
     # ── Load ──────────────────────────────────────────────────────────────────
     print(f"Loading posterior: {args.pkl}")
-    expected_meta = {"normalize": args.normalize, "cut": args.cut}
-    posterior, _ = load_posterior(args.pkl, expected_meta)
+    posterior, meta = load_posterior(args.pkl, expected_meta=None)
 
-    normalize_fn = make_normalizer(args.normalize, args.cut)
-    params, csfs = load_simulations(args.simTAG, args.threepara, normalize_fn)
+    if meta:
+        normalize = meta["normalize"]
+        cut       = meta["cut"]
+        threepara = meta.get("threepara", args.threepara)
+    else:
+        print("WARNING: legacy pkl — using --normalize / --cut / --threepara from CLI args")
+        normalize = args.normalize
+        cut       = args.cut
+        threepara = args.threepara
+
+    normalize_fn = make_normalizer(normalize, cut)
+    params, csfs = load_simulations(args.simTAG, threepara, normalize_fn)
     n_total, p   = params.shape
 
     names = PARAM_NAMES_DEFAULT[:p]
