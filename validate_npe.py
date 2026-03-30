@@ -104,6 +104,58 @@ def compute_coverage(ranks, levels=COVERAGE_LEVELS):
     return coverage
 
 
+# ── Prediction error summary ──────────────────────────────────────────────────
+
+def print_pred_error_summary(true_params, post_mode, names, n_held_out):
+    """
+    Mirrors the Default / Robust summary printed by summary.cv4abc() in the
+    R abc package (normal mode).
+
+    Default summary  — normalised MSE per parameter:
+        prederr[j] = sum((post_mode[:,j] - true[:,j])^2) / (var(true[:,j]) * n)
+
+    Robust summary   — statistics of the per-sample normalised errors:
+        err[i,j] = (post_mode[i,j] - true[i,j])^2 / var(true[:,j])
+        rows: mean, median, trimmed (10% each tail), p90
+    """
+    p = len(names)
+    true_var = true_params.var(axis=0) * n_held_out          # var * n, matching R
+
+    # per-sample normalised squared errors: (n_held, p)
+    per_sample = (post_mode - true_params) ** 2 / true_params.var(axis=0)
+
+    default_err = per_sample.mean(axis=0)                     # == sum / (var*n)
+
+    trim_k   = max(1, int(round(0.10 * n_held_out)))          # 10% trim each tail
+    trimmed  = np.array([
+        np.mean(np.sort(per_sample[:, j])[trim_k:-trim_k])
+        for j in range(p)
+    ])
+    p90      = np.percentile(per_sample, 90, axis=0)
+
+    col_w = max(12, max(len(n) for n in names) + 2)
+    header = " " * 10 + "".join(f"{n:>{col_w}}" for n in names)
+    sep    = "─" * (10 + col_w * p)
+
+    print(f"\nDefault summary:")
+    print(f"Prediction error based on a cross-validation sample of {n_held_out}\n")
+    print(header)
+    row = f"{'NPE':<10}" + "".join(f"{default_err[j]:>{col_w}.7f}" for j in range(p))
+    print(row)
+
+    print(f"\nRobust summary:")
+    print(header)
+    stats = [
+        ("mean",    per_sample.mean(axis=0)),
+        ("median",  np.median(per_sample, axis=0)),
+        ("trimmed", trimmed),
+        ("p90",     p90),
+    ]
+    for label, vals in stats:
+        print(f"{label:<10}" + "".join(f"{vals[j]:>{col_w}.7f}" for j in range(p)))
+    print()
+
+
 # ── Text output ───────────────────────────────────────────────────────────────
 
 def print_coverage_table(coverage, names, levels=COVERAGE_LEVELS):
@@ -271,6 +323,7 @@ def main():
     coverage = compute_coverage(ranks)
 
     # ── Report ────────────────────────────────────────────────────────────────
+    print_pred_error_summary(held_params, post_mode, names, args.n_held_out)
     print_coverage_table(coverage, names)
 
     print("Saving outputs...")
