@@ -17,6 +17,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
+from npe_utils import kde_mode
+
 
 PARAM_NAMES_DEFAULT = ["alpha", "T_merge", "T_split", "Ghost_Ne"]
 QUANTILE_LEVELS = [0.025, 0.25, 0.50, 0.75, 0.975]
@@ -59,15 +61,17 @@ def print_summary(samples, names):
     print(sep)
 
     header = f"  {'Parameter':<14}" + "".join(f"{lbl:>11}" for lbl in
-             ["Mean", "Std", "2.5%", "25%", "50%", "75%", "97.5%"])
+             ["Mode", "Mean", "Std", "2.5%", "25%", "50%", "75%", "97.5%"])
     print(header)
     print(sep)
 
     quantiles = np.quantile(samples, QUANTILE_LEVELS, axis=0)
     for i, name in enumerate(names):
+        mode = kde_mode(np.log(samples[:, i]))
+        mode = np.exp(mode)
         mean = samples[:, i].mean()
         std  = samples[:, i].std()
-        row  = f"  {name:<14}" + f"{mean:>11.4g}" + f"{std:>11.4g}"
+        row  = f"  {name:<14}" + f"{mode:>11.4g}" + f"{mean:>11.4g}" + f"{std:>11.4g}"
         row += "".join(f"{quantiles[q, i]:>11.4g}" for q in range(5))
         print(row)
 
@@ -104,12 +108,14 @@ def print_marginals(samples, names, out_prefix, bins=20, width=40):
     all_lines = []
 
     for i, name in enumerate(names):
-        col = samples[:, i]
-        q   = np.quantile(col, QUANTILE_LEVELS)
+        col  = samples[:, i]
+        q    = np.quantile(col, QUANTILE_LEVELS)
+        mode = np.exp(kde_mode(np.log(col)))
         header_lines = [
             "",
             f"  {'─'*60}",
             f"  Parameter : {name}",
+            f"  Mode      : {mode:.6g}",
             f"  Mean      : {col.mean():.6g}",
             f"  Std       : {col.std():.6g}",
             f"  2.5%      : {q[0]:.6g}",
@@ -144,13 +150,15 @@ def plot_marginals(samples, names, out_prefix):
         axes = [axes]
 
     quantiles = np.quantile(samples, QUANTILE_LEVELS, axis=0)
+    modes = np.array([np.exp(kde_mode(np.log(samples[:, i]))) for i in range(p)])
 
     for i, ax in enumerate(axes):
         ax.hist(samples[:, i], bins=60, density=True, color="steelblue",
                 alpha=0.75, edgecolor="none")
-        ax.axvline(quantiles[2, i], color="black",   lw=1.8, label="median")
-        ax.axvline(quantiles[0, i], color="crimson",  lw=1.2, ls="--", label="95% CI")
-        ax.axvline(quantiles[4, i], color="crimson",  lw=1.2, ls="--")
+        ax.axvline(modes[i],          color="black",   lw=1.8, label="mode")
+        ax.axvline(quantiles[2, i],   color="dimgray", lw=1.2, ls=":",  label="median")
+        ax.axvline(quantiles[0, i],   color="crimson", lw=1.2, ls="--", label="95% CI")
+        ax.axvline(quantiles[4, i],   color="crimson", lw=1.2, ls="--")
         ax.set_title(names[i], fontsize=11)
         ax.set_xlabel("value")
         if i == 0:

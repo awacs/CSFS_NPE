@@ -26,7 +26,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from npe_utils import NORMALIZE_CHOICES, make_normalizer, load_posterior
+from npe_utils import NORMALIZE_CHOICES, make_normalizer, load_posterior, kde_mode
 
 
 PARAM_NAMES_DEFAULT = ["alpha", "T_merge", "T_split", "Ghost_Ne"]
@@ -54,14 +54,14 @@ def load_simulations(simTAG, threepara, normalize_fn):
 def compute_ranks(posterior, true_log_params, x_sims, n_samples):
     """
     Returns:
-      ranks   : (n_held, p)  normalised rank of true value among posterior samples.
-      post_med: (n_held, p)  posterior median in original scale (exp of log-space median).
+      ranks     : (n_held, p)  normalised rank of true value among posterior samples.
+      post_mode : (n_held, p)  posterior mode in original scale, estimated via KDE
+                               in log-space (matching the flow's training space) then
+                               back-transformed. Uses direct flow sampling for speed —
+                               no prior rejection applied here, consistent with SBC intent.
 
     rank[i, j] = fraction of posterior samples < true_log_params[i, j].
     A uniform distribution of ranks indicates a calibrated posterior.
-
-    Uses a single batched forward pass through the flow for all held-out
-    simulations at once, bypassing per-call rejection sampling overhead.
     """
     n_held, p = true_log_params.shape
 
@@ -80,11 +80,14 @@ def compute_ranks(posterior, true_log_params, x_sims, n_samples):
     # rank[i, j] = fraction of posterior samples < true value
     ranks = (samples < true_log_params[:, None, :]).mean(axis=1)   # (n_held, p)
 
-    # posterior median in log-space, then back-transform to original scale
-    post_med = np.exp(np.median(samples, axis=1))                   # (n_held, p)
+    # posterior mode via KDE in log-space, then back-transform to original scale
+    post_mode = np.array([
+        [np.exp(kde_mode(samples[i, :, j])) for j in range(p)]
+        for i in range(n_held)
+    ])                                                               # (n_held, p)
 
     print(f"  Done.")
-    return ranks, post_med
+    return ranks, post_mode
 
 
 def compute_coverage(ranks, levels=COVERAGE_LEVELS):
@@ -188,12 +191,12 @@ def plot_ranks(ranks, names, out_prefix, bins=20):
     print(f"  Saved: {path}")
 
 
-def plot_predictions(true_params, post_med, names, out_prefix):
+def plot_predictions(true_params, post_mode, names, out_prefix):
     """
     Scatter plot of true parameter value vs posterior median, one panel per
     parameter — mirrors the default cv4abc plot.
     true_params : (n_held, p) in original scale
-    post_med    : (n_held, p) in original scale
+    post_mode    : (n_held, p) in original scale
     """
     p   = len(names)
     fig, axes = plt.subplots(1, p, figsize=(4 * p, 4))
@@ -201,10 +204,10 @@ def plot_predictions(true_params, post_med, names, out_prefix):
         axes = [axes]
 
     for j, (ax, name) in enumerate(zip(axes, names)):
-        ax.scatter(true_params[:, j], post_med[:, j],
+        ax.scatter(true_params[:, j], post_mode[:, j],
                    s=10, alpha=0.5, color="steelblue", edgecolors="none")
-        lims = [min(true_params[:, j].min(), post_med[:, j].min()),
-                max(true_params[:, j].max(), post_med[:, j].max())]
+        lims = [min(true_params[:, j].min(), post_mode[:, j].min()),
+                max(true_params[:, j].max(), post_mode[:, j].max())]
         ax.plot(lims, lims, "k--", lw=1, label="ideal")
         ax.set_xlabel("True value"); ax.set_ylabel("Posterior median")
         ax.set_title(name, fontsize=10)
@@ -264,7 +267,7 @@ def main():
     print(f"Parameters: {names}\n")
 
     # ── SBC ───────────────────────────────────────────────────────────────────
-    ranks, post_med = compute_ranks(posterior, log_params, held_csfs, args.n_posterior_samples)
+    ranks, post_mode = compute_ranks(posterior, log_params, held_csfs, args.n_posterior_samples)
     coverage = compute_coverage(ranks)
 
     # ── Report ────────────────────────────────────────────────────────────────
@@ -274,7 +277,7 @@ def main():
     save_coverage_txt(coverage, names, COVERAGE_LEVELS, args.out_prefix)
     plot_coverage(coverage, names, args.out_prefix)
     plot_ranks(ranks, names, args.out_prefix)
-    plot_predictions(held_params, post_med, names, args.out_prefix)
+    plot_predictions(held_params, post_mode, names, args.out_prefix)
 
     # Save raw ranks for further analysis
     np.save(f"{args.out_prefix}_ranks.npy", ranks)

@@ -6,6 +6,7 @@ import pickle
 import sys
 import numpy as np
 import pandas as pd
+from scipy.stats import gaussian_kde
 
 
 NORMALIZE_CHOICES = ["none", "median", "median_pre_cut", "sum", "sum_pre_cut"]
@@ -117,6 +118,16 @@ def _validate_meta(meta, expected, path):
         )
 
 
+def kde_mode(x, n_grid=512):
+    """Estimate the mode of a 1-D sample via KDE (Silverman bandwidth, matching R's density()).
+
+    x should be in the space where you want the mode (log-space or original scale).
+    """
+    kde  = gaussian_kde(x)
+    grid = np.linspace(x.min(), x.max(), n_grid)
+    return grid[np.argmax(kde(grid))]
+
+
 def load_target(path, normalize_fn):
     """Load a CSFS file, sum rows, and return (normalized, raw) as float32."""
     raw = pd.read_csv(path, sep=r'\s+', header=None).values.sum(axis=0).astype(np.float32)
@@ -124,7 +135,15 @@ def load_target(path, normalize_fn):
 
 
 def save_results(outbase, samples, samples_log, x_obs_np):
-    """Save posterior samples and summary statistics to a .npz archive."""
+    """Save posterior samples and summary statistics to a .npz archive.
+
+    Modes are computed via KDE in log-space (samples_log) then back-transformed,
+    matching the space in which the flow was trained.
+    """
+    param_modes = np.array([
+        np.exp(kde_mode(samples_log[:, j]))
+        for j in range(samples_log.shape[1])
+    ])
     np.savez(
         outbase + "_results.npz",
         samples=samples,
@@ -132,10 +151,12 @@ def save_results(outbase, samples, samples_log, x_obs_np):
         x_obs=x_obs_np,
         param_means=samples.mean(axis=0),
         param_stds=samples.std(axis=0),
+        param_modes=param_modes,
         param_quantiles=np.quantile(samples, [0.025, 0.25, 0.5, 0.75, 0.975], axis=0),
     )
     print(f"  Results archive : {outbase}_results.npz")
     print(f"Posterior samples shape: {samples.shape}")
-    print(f"Parameter means: {samples.mean(axis=0)}")
-    print(f"Parameter stds:  {samples.std(axis=0)}")
+    print(f"Parameter modes (KDE): {param_modes}")
+    print(f"Parameter means:       {samples.mean(axis=0)}")
+    print(f"Parameter stds:        {samples.std(axis=0)}")
     print(f"95% CI:\n{np.quantile(samples, [0.025, 0.975], axis=0)}")
