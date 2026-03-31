@@ -106,6 +106,26 @@ def compute_coverage(ranks, levels=COVERAGE_LEVELS):
 
 # ── Prediction error summary ──────────────────────────────────────────────────
 
+def _pred_error_data(true_params, post_mode, names, n_held_out):
+    """Compute normalised prediction error statistics; returns (default_err, stats, col_w)."""
+    p          = len(names)
+    per_sample = (post_mode - true_params) ** 2 / true_params.var(axis=0)
+    default_err = per_sample.mean(axis=0)
+    trim_k      = max(1, int(round(0.10 * n_held_out)))
+    trimmed     = np.array([
+        np.mean(np.sort(per_sample[:, j])[trim_k:-trim_k])
+        for j in range(p)
+    ])
+    stats = [
+        ("mean",    per_sample.mean(axis=0)),
+        ("median",  np.median(per_sample, axis=0)),
+        ("trimmed", trimmed),
+        ("p90",     np.percentile(per_sample, 90, axis=0)),
+    ]
+    col_w = max(12, max(len(n) for n in names) + 2)
+    return default_err, stats, col_w
+
+
 def print_pred_error_summary(true_params, post_mode, names, n_held_out):
     """
     Mirrors the Default / Robust summary printed by summary.cv4abc() in the
@@ -119,41 +139,43 @@ def print_pred_error_summary(true_params, post_mode, names, n_held_out):
         rows: mean, median, trimmed (10% each tail), p90
     """
     p = len(names)
-    true_var = true_params.var(axis=0) * n_held_out          # var * n, matching R
-
-    # per-sample normalised squared errors: (n_held, p)
-    per_sample = (post_mode - true_params) ** 2 / true_params.var(axis=0)
-
-    default_err = per_sample.mean(axis=0)                     # == sum / (var*n)
-
-    trim_k   = max(1, int(round(0.10 * n_held_out)))          # 10% trim each tail
-    trimmed  = np.array([
-        np.mean(np.sort(per_sample[:, j])[trim_k:-trim_k])
-        for j in range(p)
-    ])
-    p90      = np.percentile(per_sample, 90, axis=0)
-
-    col_w = max(12, max(len(n) for n in names) + 2)
+    default_err, stats, col_w = _pred_error_data(true_params, post_mode, names, n_held_out)
     header = " " * 10 + "".join(f"{n:>{col_w}}" for n in names)
-    sep    = "─" * (10 + col_w * p)
 
     print(f"\nDefault summary:")
     print(f"Prediction error based on a cross-validation sample of {n_held_out}\n")
     print(header)
-    row = f"{'NPE':<10}" + "".join(f"{default_err[j]:>{col_w}.7f}" for j in range(p))
-    print(row)
+    print(f"{'NPE':<10}" + "".join(f"{default_err[j]:>{col_w}.7f}" for j in range(p)))
 
     print(f"\nRobust summary:")
     print(header)
-    stats = [
-        ("mean",    per_sample.mean(axis=0)),
-        ("median",  np.median(per_sample, axis=0)),
-        ("trimmed", trimmed),
-        ("p90",     p90),
-    ]
     for label, vals in stats:
         print(f"{label:<10}" + "".join(f"{vals[j]:>{col_w}.7f}" for j in range(p)))
     print()
+
+
+def save_pred_error_txt(true_params, post_mode, names, n_held_out, out_prefix):
+    p = len(names)
+    default_err, stats, col_w = _pred_error_data(true_params, post_mode, names, n_held_out)
+    header = " " * 10 + "".join(f"{n:>{col_w}}" for n in names)
+
+    lines = [
+        "Default summary:",
+        f"Prediction error based on a cross-validation sample of {n_held_out}",
+        "",
+        header,
+        f"{'NPE':<10}" + "".join(f"{default_err[j]:>{col_w}.7f}" for j in range(p)),
+        "",
+        "Robust summary:",
+        header,
+    ]
+    for label, vals in stats:
+        lines.append(f"{label:<10}" + "".join(f"{vals[j]:>{col_w}.7f}" for j in range(p)))
+
+    path = f"{out_prefix}_pred_error.txt"
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"  Saved: {path}")
 
 
 # ── Text output ───────────────────────────────────────────────────────────────
@@ -337,6 +359,7 @@ def main():
     print_coverage_table(coverage, names)
 
     print("Saving outputs...")
+    save_pred_error_txt(held_params, post_mode, names, args.n_held_out, args.out_prefix)
     save_coverage_txt(coverage, names, COVERAGE_LEVELS, args.out_prefix)
     plot_coverage(coverage, names, args.out_prefix)
     plot_ranks(ranks, names, args.out_prefix)
