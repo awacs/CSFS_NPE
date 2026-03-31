@@ -238,10 +238,13 @@ def plot_coverage(coverage, names, out_prefix, levels=COVERAGE_LEVELS):
 
 
 def plot_ranks(ranks, names, out_prefix, bins=20):
-    p   = ranks.shape[1]
-    fig, axes = plt.subplots(1, p, figsize=(4 * p, 3.5))
-    if p == 1:
-        axes = [axes]
+    p    = ranks.shape[1]
+    ncols = 2
+    nrows = (p + 1) // 2
+    fig, axes = plt.subplots(nrows, ncols, figsize=(8, 3.5 * nrows))
+    axes = np.array(axes).flatten()
+    for ax in axes[p:]:
+        ax.set_visible(False)
 
     expected_height = len(ranks) / bins    # flat uniform bar height
 
@@ -272,10 +275,13 @@ def plot_predictions(true_params, post_mode, names, out_prefix):
     true_params : (n_held, p) in original scale
     post_mode    : (n_held, p) in original scale
     """
-    p   = len(names)
-    fig, axes = plt.subplots(1, p, figsize=(4 * p, 4))
-    if p == 1:
-        axes = [axes]
+    p    = len(names)
+    ncols = 2
+    nrows = (p + 1) // 2
+    fig, axes = plt.subplots(nrows, ncols, figsize=(8, 4 * nrows))
+    axes = np.array(axes).flatten()
+    for ax in axes[p:]:
+        ax.set_visible(False)
 
     for j, (ax, name) in enumerate(zip(axes, names)):
         ax.scatter(true_params[:, j], post_mode[:, j],
