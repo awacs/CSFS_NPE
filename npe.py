@@ -68,7 +68,11 @@ def main():
                         help="Observed CSFS file")
     parser.add_argument("--simTAG", type=str, default=None,
                         help="Simulation tag — triggers training mode; "
-                             "expects <tag>.par.txt_DEN and <tag>.sim.txt_DEN")
+                             "expects <tag>.par.txt<suffix> and <tag>.sim.txt<suffix>")
+    parser.add_argument("--suffix", type=str, default="_DEN",
+                        help="Filename suffix on the .par.txt/.sim.txt inputs "
+                             "(default: _DEN). Also appended to output filenames "
+                             "when non-default.")
     parser.add_argument("--load_posterior", type=str, default=None,
                         help="Path to existing .pkl — skips training, resamples for new target")
     parser.add_argument("--threepara", action="store_true", default=False,
@@ -101,6 +105,7 @@ def main():
     # suffix encodes sampler only when non-default, to keep filenames clean
     sampler_tag = "" if args.sampler == "rejection" else f"_{args.sampler}"
     cut_tag     = f"_cut{args.cut}" if args.cut > 0 else ""
+    suffix_tag  = "" if args.suffix == "_DEN" else args.suffix
 
     # ── Load observed target ──────────────────────────────────────────────────
     print(f"Loading observed target from {args.target}")
@@ -131,8 +136,8 @@ def main():
 
     # ── Train mode ────────────────────────────────────────────────────────────
     TAG      = args.simTAG
-    parfile  = f"{TAG}.par.txt_DEN"
-    csfsfile = f"{TAG}.sim.txt_DEN"
+    parfile  = f"{TAG}.par.txt{args.suffix}"
+    csfsfile = f"{TAG}.sim.txt{args.suffix}"
 
     print(f"Loading parameters from {parfile}")
     parsim = pd.read_csv(parfile, sep=r'\s+', header=None)
@@ -183,7 +188,7 @@ def main():
     tag_base    = os.path.basename(TAG)
     os.makedirs(args.out_dir, exist_ok=True)
     outbase     = os.path.join(args.out_dir,
-                               f"{target_base}{tag_base}{tag_suffix}_{args.normalize}{cut_tag}_npe{sampler_tag}")
+                               f"{target_base}{tag_base}{tag_suffix}_{args.normalize}{cut_tag}{suffix_tag}_npe{sampler_tag}")
 
     save_results(outbase, samples, samples_log.numpy(), x_obs_raw)
 
@@ -192,6 +197,7 @@ def main():
         "cut":       args.cut,
         "threepara": args.threepara,
         "sampler":   args.sampler,
+        "suffix":    args.suffix,
     }
     save_posterior(outbase + "_posterior.pkl", posterior, meta)
 

@@ -36,9 +36,9 @@ COVERAGE_LEVELS     = np.round(np.linspace(0.05, 0.95, 19), 3)
 # ── I/O ───────────────────────────────────────────────────────────────────────
 
 
-def load_simulations(simTAG, threepara, normalize_fn):
-    parfile  = f"{simTAG}.par.txt_DEN"
-    csfsfile = f"{simTAG}.sim.txt_DEN"
+def load_simulations(simTAG, threepara, normalize_fn, suffix="_DEN"):
+    parfile  = f"{simTAG}.par.txt{suffix}"
+    csfsfile = f"{simTAG}.sim.txt{suffix}"
     print(f"Loading {parfile}")
     params = np.loadtxt(parfile, dtype=np.float32)
     print(f"Loading {csfsfile}")
@@ -319,6 +319,9 @@ def main():
                         help="Fallback for legacy pkls with no metadata")
     parser.add_argument("--cut", type=int, default=0,
                         help="Fallback for legacy pkls with no metadata")
+    parser.add_argument("--suffix", type=str, default="_DEN",
+                        help="Filename suffix on the .par.txt/.sim.txt inputs "
+                             "(default: _DEN). Ignored when pkl meta records a suffix.")
     args = parser.parse_args()
 
     # ── Load ──────────────────────────────────────────────────────────────────
@@ -329,14 +332,16 @@ def main():
         normalize = meta["normalize"]
         cut       = meta["cut"]
         threepara = meta.get("threepara", args.threepara)
+        suffix    = meta.get("suffix", args.suffix)
     else:
-        print("WARNING: legacy pkl — using --normalize / --cut / --threepara from CLI args")
+        print("WARNING: legacy pkl — using --normalize / --cut / --threepara / --suffix from CLI args")
         normalize = args.normalize
         cut       = args.cut
         threepara = args.threepara
+        suffix    = args.suffix
 
     normalize_fn = make_normalizer(normalize, cut)
-    params, csfs = load_simulations(args.simTAG, threepara, normalize_fn)
+    params, csfs = load_simulations(args.simTAG, threepara, normalize_fn, suffix)
     n_total, p   = params.shape
 
     names = PARAM_NAMES_DEFAULT[:p]
