@@ -130,6 +130,14 @@ if (threepara){
 # }
 l=parsim$V2>2155   # pre OOA
 m=parsim$V2<2155   # post OOA
+
+# Name the parameter columns so cv4abc's accuracy/SBC plots carry real labels
+# (matches PARAM_NAMES_DEFAULT in validate_npe.py). Read with header=F, so
+# parsim otherwise keeps generic V1..V4 names. Done after the parsim$V2 uses
+# above so those column references still resolve.
+param_names <- c("alpha", "T_merge", "T_split", "Ghost_Ne")
+colnames(parsim) <- param_names[1:ncol(parsim)]
+
 res <- abc(target=tgt, param=parsim,sumstat=normalized_csfs_sim, tol=0.01,method="neuralnet",numnet=50,sizenet=7,transf="log",MaxNWts = 1500)
 
 save.image(paste0(targetfile, TAG, ifelse(threepara, "_3para_", "_4para_"), normalization_method, ".RData"))
