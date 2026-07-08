@@ -271,8 +271,10 @@ def plot_ranks(ranks, names, out_prefix, bins=20):
 
 def plot_predictions(true_params, post_mode, names, out_prefix):
     """
-    Scatter plot of true parameter value vs posterior median, one panel per
-    parameter — mirrors the default cv4abc plot.
+    Scatter plot of true parameter value vs the estimated value (posterior
+    mode), one panel per parameter — mirrors the default cv4abc plot, which
+    also uses the mode as its point estimate and labels the axis "Estimated
+    value".
     true_params : (n_held, p) in original scale
     post_mode    : (n_held, p) in original scale
     """
@@ -291,11 +293,11 @@ def plot_predictions(true_params, post_mode, names, out_prefix):
                 max(true_params[:, j].max(), post_mode[:, j].max())]
         ax.plot(lims, lims, "k--", lw=1, label="ideal")
         ax.set_xlabel("True value", fontsize=12)
-        ax.set_ylabel("Posterior median", fontsize=12)
+        ax.set_ylabel("Estimated value", fontsize=12)
         ax.tick_params(labelsize=11)
         ax.set_title(name, fontsize=13)
 
-    fig.suptitle("True vs Posterior Median", fontsize=14)
+    fig.suptitle("True vs Estimated value", fontsize=14)
     plt.tight_layout()
     path = f"{out_prefix}_predictions.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
