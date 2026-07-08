@@ -253,14 +253,15 @@ def plot_ranks(ranks, names, out_prefix, bins=20):
                 color="steelblue", alpha=0.75, edgecolor="white")
         ax.axhline(expected_height, color="crimson", lw=1.5,
                    ls="--", label="uniform")
-        ax.set_title(name, fontsize=10)
-        ax.set_xlabel("normalized rank")
+        ax.set_title(name, fontsize=13)
+        ax.set_xlabel("normalized rank", fontsize=12)
+        ax.tick_params(labelsize=11)
         if j == 0:
-            ax.set_ylabel("count")
+            ax.set_ylabel("count", fontsize=12)
         if j == p - 1:
-            ax.legend(fontsize=8)
+            ax.legend(fontsize=11)
 
-    fig.suptitle("SBC Rank Histograms\n(flat = well calibrated)", fontsize=12)
+    fig.suptitle("SBC Rank Histograms\n(flat = well calibrated)", fontsize=14)
     plt.tight_layout()
     path = f"{out_prefix}_ranks.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
@@ -285,14 +286,16 @@ def plot_predictions(true_params, post_mode, names, out_prefix):
 
     for j, (ax, name) in enumerate(zip(axes, names)):
         ax.scatter(true_params[:, j], post_mode[:, j],
-                   s=10, alpha=0.5, color="red", edgecolors="none")
+                   s=35, alpha=0.5, color="red", edgecolors="none")
         lims = [min(true_params[:, j].min(), post_mode[:, j].min()),
                 max(true_params[:, j].max(), post_mode[:, j].max())]
         ax.plot(lims, lims, "k--", lw=1, label="ideal")
-        ax.set_xlabel("True value"); ax.set_ylabel("Posterior median")
-        ax.set_title(name, fontsize=10)
+        ax.set_xlabel("True value", fontsize=12)
+        ax.set_ylabel("Posterior median", fontsize=12)
+        ax.tick_params(labelsize=11)
+        ax.set_title(name, fontsize=13)
 
-    fig.suptitle("True vs Posterior Median", fontsize=12)
+    fig.suptitle("True vs Posterior Median", fontsize=14)
     plt.tight_layout()
     path = f"{out_prefix}_predictions.png"
     fig.savefig(path, dpi=150, bbox_inches="tight")
